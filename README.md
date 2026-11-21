@@ -11,12 +11,17 @@
 .
 ├── frontend/                 Vue 3 + Vite + TypeScript 前端
 │   ├── src/views/WorkbenchView.vue|tsx  全部模块共享工作台
+│   ├── src/views/LineageConsole.vue     导出血缘查询与回溯重放值班控制台
+│   ├── src/api/lineage-service.ts       血缘查询/补证/重放/核对接口封装
 │   ├── src/data/modules.ts              18个业务模块配置
 │   ├── src/api/              统一请求封装
 │   └── vite.config.ts        dev server 配置（open: false）
 ├── backend/                  FastAPI（Python） 后端
 │   ├── app/routers/resource.py  通用查询/导出/登记/动作接口
+│   ├── app/routers/lineage_router.py  导出血缘查询与回溯重放接口
 │   ├── app/services/<key>.py    每个模块独立领域逻辑
+│   ├── app/services/lineage_manifest.py  导出血缘查询与可重放批次清单
+│   ├── app/services/replay_runner.py     按清单重放、断点续跑与来源清单回写
 │   ├── app/services/base.py     共享服务骨架
 │   └── app/store.py          内存数据仓库与示例数据
 ├── .gitignore
@@ -78,6 +83,25 @@ npm run dev
   `frontend/src/domain/<模块>.ts`，用于承载真实业务差异并维持36题位容量。
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
+
+## 导出血缘查询与回溯重放（值班控制台 `/lineage-console`）
+
+解决「没有按交付编号检索原始批次的能力」的问题：按导出交付物读取视图分组关联的来源
+血缘，生成可重放的批次清单，再由重放引擎按清单读取原文、把结果回写交付物来源清单。
+
+- `GET /api/lineage/exports?keyword=`：检索导出，兼容导出编号、视图名、文件路径、
+  `export-{id}` 等历史导出引用，返回每条导出的已验证血缘数与缺口数。
+- `POST /api/lineage/query`：生成持久化清单 `lineage_manifest`，同时返回当前可读来源
+  与待核实历史分组；只有「血缘已记录 + 批次存在 + 原文可读」的批次进入
+  `executable_scope`，未核实来源不进可执行范围。
+- `POST /api/lineage/verify`：对缺口血缘补证核实，补证后重查清单即可扩大可执行范围。
+- `POST /api/lineage/replay/start` / `replay/resume`：按清单读原文重放，每读完一个
+  批次落检查点 `last_read_batch`，中断后从上次实际读取批次之后续跑；同一清单+规则
+  重复提交幂等，每条原文只产出一次结果。
+- `GET /api/lineage/reconcile?export_ref=`：对照交付物实际读取的批次、原始行与产出
+  明细，逐编号核对，并列出未进入重放的缺口。
+- 内置演示导出 `DL-EXPORT-01`：含两条已验证血缘（`BATCH-L1/L2`）和一处待验证缺口
+  （`BATCH-L3`），首次调用任一 `/api/lineage/*` 接口时幂等初始化。
 
 领域：数据工程
 子方向：数据采集、爬虫与RPA
